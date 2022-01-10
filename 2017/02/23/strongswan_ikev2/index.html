@@ -1,0 +1,264 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>在iOS配置基于Strongswan的免证书IKEv2 WePN | Feather</title>
+
+  
+  <meta name="author" content="Feather">
+  
+
+  
+  <meta name="description" content="本文某个不可描述词由于不可描述原因用WePN代替。
+之前根据CentOS/Ubuntu一键安装IPSEC/IKEV2 WePN服务器 搭建一个WePN服务器，这套方案里面提供了两种方式连接IPSec（即IKEv1）和IKEv2，前者可以通过帐号、密码以及密钥PSK 即可连接，比较方便。后者需要证书，比较麻烦。所以我使用了IPsec作为iOS客户端产品的最终方案。
+最近突然想起这件事情，加上之前调研的实践让我记得IKEv2方案其实更加安全并且稳定。『稳定』的表现是，可以在切换网络依然保持WePN不断开，这是一种不错的体验。所以，打算把目前方案迁移为IKEv2，所以做了一下调研。
+首先是『无证书』问题。对于IKEv2，之前有了解到是可以实现无证书连接，这点很重要，不然得引导用户安装证书才能连接，体验会很差。今天用了一些时间调研，大概有下面这些方案：
+
+服务器使用自签发证书，客户端需要提前安装配套证书
+服务器使用CA证书，则客户端则可免证书
+服务器使用PSK密钥验证，客户端添加带PSK的WePN配置描述文件
+服务器使用PSK密钥验证，客户端通过程序添加带PSK的WePN配置
+
+1和2这两个方案都不是真正的免证书，它们出现在很多文章里，但这里的『无证书』并不是指完全不用证书，而是是指客户端连接之前不需要配置证书，但服务器端依然需要。根据用 strongSwan 搭建免证书的 IKEv2 WePN 一文描述，确实可以通过PSK密钥代替证书实现服务器和客户端都无证书的方案（方案3），但是这个方案在设置GUI中无法配置，只能通过添加描述文件来配置，挺扯蛋的。但是，我发现这个办法在通过程序配置也是可以的，也就是第4个方案，网上没有找到任何人提出这个方案，我后面会详细介绍。  
+因为只有2和4方案是无需用户做额外配置，所以下面只讨论这两种方案。另外，需要说明的是，这些方案只有iOS客户端验证成功，其他客户端理论可行，欢迎反馈。">
+  
+
+  
+  
+  <meta name="keywords" content="ios,ikev2,WePN,strongwans">
+  
+
+  <meta id="viewport" name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, minimal-ui">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+
+  <meta property="og:title" content="在iOS配置基于Strongswan的免证书IKEv2 WePN"/>
+
+  <meta property="og:site_name" content="Feather"/>
+
+  
+  <meta property="og:image" content="/favicon.ico"/>
+  
+
+  <link href="/favicon.ico" rel="icon">
+  <link rel="alternate" href="/atom.xml" title="Feather" type="application/atom+xml">
+  <link rel="stylesheet" href="/css/style.css" media="screen" type="text/css">
+
+    <!--prettify code-->
+  <link rel="stylesheet" href="/prettify/prettify.css" type="text/css">
+  <script src="/zepto.js" type="text/javascript"></script>
+  <script src="/prettify/prettify.js" type="text/javascript"></script>
+  <script type="text/javascript">
+  $(function(){
+      $('pre').addClass('prettyprint linenums').attr('style', 'overflow:auto;');
+      prettyPrint();
+    });
+  </script>
+  <style media="screen">
+  pre{
+      font-size: 14px;
+        /*word-break: break-all;*/
+        /*word-wrap: break-word;*/
+    }
+  </style>
+  <!--prettify code-->
+
+  <script>
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?f81ca1ed55355a989137215564033fe4";
+  var s = document.getElementsByTagName("script")[0];
+  s.parentNode.insertBefore(hm, s);
+})();
+</script>
+
+</head>
+
+
+<body>
+<div class="blog">
+  <div class="content">
+
+    <header>
+  <div class="site-branding">
+    <h1 class="site-title">
+      <a href="/">Feather</a>
+    </h1>
+    <p class="site-description"></p>
+  </div>
+  <nav class="site-navigation">
+    <ul>
+      
+        <li><a href="/">Home</a></li>
+      
+        <li><a href="/archives">Archives</a></li>
+      
+        <li><a href="/about-me">About</a></li>
+      
+    </ul>
+  </nav>
+</header>
+
+    <main class="site-main posts-loop">
+    <article>
+
+  
+    
+    <h3 class="article-title"><span>在iOS配置基于Strongswan的免证书IKEv2 WePN</span></h3>
+    
+  
+
+  <div class="article-top-meta">
+    <span class="posted-on">
+      <a href="/2017/02/23/strongswan_ikev2/" rel="bookmark">
+        <time class="entry-date published" datetime="2017-02-23T10:09:37.000Z">
+          2017-02-23
+        </time>
+      </a>
+    </span>
+  </div>
+
+
+  
+
+  <div class="article-content">
+    <div class="entry">
+      
+        <p>本文某个不可描述词由于不可描述原因用WePN代替。</p>
+<p>之前根据<a href="https://quericy.me/blog/699/" target="_blank" rel="external">CentOS/Ubuntu一键安装IPSEC/IKEV2 WePN服务器</a> 搭建一个WePN服务器，这套方案里面提供了两种方式连接IPSec（即IKEv1）和IKEv2，前者可以通过帐号、密码以及密钥PSK 即可连接，比较方便。后者需要证书，比较麻烦。所以我使用了IPsec作为iOS客户端产品的最终方案。</p>
+<p>最近突然想起这件事情，加上之前调研的实践让我记得IKEv2方案其实更加安全并且稳定。『稳定』的表现是，可以在切换网络依然保持WePN不断开，这是一种不错的体验。所以，打算把目前方案迁移为IKEv2，所以做了一下调研。</p>
+<p>首先是『无证书』问题。对于IKEv2，之前有了解到是可以实现无证书连接，这点很重要，不然得引导用户安装证书才能连接，体验会很差。今天用了一些时间调研，大概有下面这些方案：</p>
+<ol>
+<li>服务器使用自签发证书，客户端需要提前安装配套证书</li>
+<li>服务器使用CA证书，则客户端则可免证书</li>
+<li>服务器使用PSK密钥验证，客户端添加带PSK的WePN配置描述文件</li>
+<li>服务器使用PSK密钥验证，客户端通过程序添加带PSK的WePN配置</li>
+</ol>
+<p>1和2这两个方案都不是真正的免证书，它们出现在很多文章里，但这里的『无证书』并不是指完全不用证书，而是是指客户端连接之前不需要配置证书，但服务器端依然需要。根据<a href="https://zorro.im/strongswan-ikev2-for-ios-without-certificate/" target="_blank" rel="external">用 strongSwan 搭建免证书的 IKEv2 WePN</a> 一文描述，确实可以通过PSK密钥代替证书实现服务器和客户端都无证书的方案（方案3），但是这个方案在设置GUI中无法配置，只能通过添加描述文件来配置，挺扯蛋的。但是，我发现这个办法在通过程序配置也是可以的，也就是第4个方案，网上没有找到任何人提出这个方案，我后面会详细介绍。  </p>
+<p>因为只有2和4方案是无需用户做额外配置，所以下面只讨论这两种方案。另外，需要说明的是，这些方案只有iOS客户端验证成功，其他客户端理论可行，欢迎反馈。</p>
+<a id="more"></a>
+<h2 id="方案一-服务器使用CA证书"><a href="#方案一-服务器使用CA证书" class="headerlink" title="方案一/服务器使用CA证书"></a>方案一/服务器使用CA证书</h2><p>首先，弄个CA证书，CA证书很多免费的，这边查到了比较多人使用的是Let’s Encrypt SSL，但是有一个缺点就是需要定时续期。以下是配置步骤：</p>
+<p><strong>1.安装Let’s Encrypt SSL的客户端</strong></p>
+<pre><code>git clone https://github.com/letsencrypt/letsencrypt
+cd letsencrypt
+./letsencrypt-auto --help
+</code></pre><p><strong>2.执行客户端申请证书，按照提示输入邮箱和域名就完成了</strong></p>
+<pre><code>./letsencrypt-auto certonly --server https://acme-v01.api.letsencrypt.org/directory --agree-dev-preview
+</code></pre><p><img src="https://ww1.sinaimg.cn/large/006tNc79gy1fd0u0g0kvtj31kw0kj13r.jpg" width="500px"></p>
+<p><strong>3.证书三个月后就过期，可以设定一个定时器，执行以下续期脚本</strong></p>
+<pre><code>sudo ~/.local/share/letsencrypt/bin/letsencrypt renew
+</code></pre><p><strong>4.把证书全部复制到strongswan一键安装脚本目录</strong></p>
+<pre><code>cp chain.pem /root/ca.cert.pem # 包括根证书的链证书
+cp cert.pem /root/server.cert.pem # 服务器证书
+cp privkey.pem /root/server.pem # 服务器私钥
+</code></pre><p><strong>5.然后就是安装Strongswan了，注意两点：</strong><br>1) 证书选择自己导入证书，否则脚本会自己生成自签发证书；<br><img src="https://ww3.sinaimg.cn/large/006tNc79gy1fd0tyv99edj31kw0kok67.jpg" width="600px"></p>
+<p>2) 安装完之后，需要去/usr/local/etc/ipsec.conf修改leftid，leftid需要和证书的域名保持一致，域名可以不指向本机IP，就是说一个有效证书可以用在多个Strongswan WePN的服务器上；<br><img src="https://ww1.sinaimg.cn/large/006tNc79gy1fd0tziib8lj31kw1fd4di.jpg" width="400px"></p>
+<p><strong>6. 启动Strongswan之后，就用手机连接了。下面是系统WePN设置页面的配置Demo；</strong></p>
+<p><img src="https://ww2.sinaimg.cn/large/006tNc79gy1fd0u06n4bzj30jz0zkgmx.jpg" width="320px"></p>
+<h2 id="方案二-服务器使用PSK密钥验证"><a href="#方案二-服务器使用PSK密钥验证" class="headerlink" title="方案二/服务器使用PSK密钥验证"></a>方案二/服务器使用PSK密钥验证</h2><p>这个办法其实很简单，但是用了我蛮多时间去摸索这些配置信息的。在服务器中打开<code>/usr/local/etc/ipsec.conf</code>，然后加上下面这段配置：</p>
+<pre><code>conn ios_ikev2_xauth_psk
+        keyexchange=ikev2
+        leftid=okVPN
+        left=%defaultroute
+        leftauth=psk
+        leftsubnet=0.0.0.0/0
+        right=%any
+        rightauth=eap-mschapv2
+        rightsourceip=10.31.2.0/24
+        rightsendcert=never
+        eap_identity=%any
+        dpdaction=clear
+        fragmentation=yes
+        auto=add
+</code></pre><p>然后，客户端的配置和IPSec的方法基本一致，但是要主要改两个地方：</p>
+<pre><code class="swift">var p = NEVPNProtocolIPSec()
+if VPNServer?.objectForKey(&quot;method&quot;) as! String? == &quot;ikev2&quot; {
+    p = NEVPNProtocolIKEv2()
+    p.remoteIdentifier = &quot;okVPN&quot;
+}
+p.username = self.username
+p.serverAddress = VPN_IP_ADDRESS
+p.passwordReference = keychain[attributes: &quot;VPNpassword&quot;]!.persistentRef
+p.authenticationMethod = .SharedSecret
+p.sharedSecretReference = keychain[attributes: &quot;sharedSecret&quot;]!.persistentRef
+p.useExtendedAuthentication = true
+</code></pre>
+<h2 id="Reference"><a href="#Reference" class="headerlink" title="Reference"></a>Reference</h2><p><a href="https://wiki.strongswan.org/projects/strongswan/wiki/AppleIKEv2Profile" target="_blank" rel="external">IKEv2 Configuration Profile for Apple iOS 8 and newer</a><br><a href="https://linsir.org/post/Strongswan-not-import-certs-and-some-tips" target="_blank" rel="external">Strongswan IKEV2免导入证书配置及调试笔记</a><br><a href="https://zorro.im/strongswan-ikev2-for-ios-without-certificate/" target="_blank" rel="external">用 strongSwan 搭建免证书的 IKEv2 WePN</a><br><a href="https://shanbin.name/lets-encrypt-ssl-certificates-for-free/" target="_blank" rel="external">申请免费的Let’s Encrypt SSL证书</a></p>
+
+      
+    </div>
+
+  </div>
+
+  <div class="article-footer">
+    <div class="article-meta pull-left">
+
+    
+      
+
+    <span class="post-categories">
+      <i class="icon-categories"></i>
+        <a href="/categories/Tech/">Tech</a>
+    </span>
+    
+
+    
+    
+
+    <span class="post-tags">
+      <i class="icon-tags"></i>
+        <a href="/tags/ios/">ios</a><a href="/tags/ikev2/">ikev2</a><a href="/tags/WePN/">WePN</a><a href="/tags/strongwans/">strongwans</a>
+    </span>
+    
+
+    </div>
+
+    
+  </div>
+</article>
+
+  
+	<div id="comment">
+		
+	<!-- 多说评论框 start -->
+	 <div class="ds-thread" data-thread-key="/2017/02/23/strongswan_ikev2/" data-title="在iOS配置基于Strongswan的免证书IKEv2 WePN" data-url="http://blog.vinqon.com/2017/02/23/strongswan_ikev2/"></div>
+	<!-- 多说评论框 end -->
+	<!-- 多说公共JS代码 start (一个网页只需插入一次) -->
+	<script type="text/javascript">
+	var duoshuoQuery = {short_name:"vinqon"};
+	  (function() {
+	    var ds = document.createElement('script');
+	    ds.type = 'text/javascript';ds.async = true;
+	    ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
+	    ds.charset = 'UTF-8';
+	    (document.getElementsByTagName('head')[0]
+	     || document.getElementsByTagName('body')[0]).appendChild(ds);
+	  })();
+	  </script>
+	<!-- 多说公共JS代码 end -->
+
+	</div>
+
+
+
+
+    </main>
+
+    <footer class="site-footer">
+  <p class="site-info">
+    Proudly powered by <a href="https://hexo.io/" target="_blank">Hexo</a> and
+    Theme by <a href="https://github.com/CodeDaraW/Hacker" target="_blank">Hacker</a>
+    </br>
+    
+    &copy; 2017 Feather
+    
+  </p>
+</footer>
+
+    
+  </div>
+</div>
+</body>
+</html>
